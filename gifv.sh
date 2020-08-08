@@ -1,15 +1,44 @@
 #!/bin/bash
 
-target_video_size_MB="$2"
-origin_duration_s=$(ffprobe -v error -show_streams -select_streams a "$1" | grep -Po "(?<=^duration\=)\d*\.\d*")
-origin_audio_bitrate_kbit_s=$(ffprobe -v error -pretty -show_streams -select_streams a "$1" | grep -Po "(?<=^bit_rate\=)\d*\.\d*")
-target_audio_bitrate_kbit_s=$origin_audio_bitrate_kbit_s # TODO for now, make audio bitrate the same
+origin_file_name="${1%.*}"
+
+origin_codec=$(ffprobe -v error -show_streams -select_streams v "$1" | perl -nle'print $& while m{(?<=^codec_name\=).*$}g')
+if [ $origin_codec = "h264" ]
+then
+    ffmpeg \
+        -i "$1" \
+        -c:v copy \
+        -an \
+        "${origin_file_name}-an.mp4"
+    origin_size=$(wc -c "${origin_file_name}-an.mp4" | perl -nle'print $& while m{(?<=^\s)\d*}g')
+    if (( $origin_size < 10000000 ))
+    then
+        mv "${origin_file_name}-an.mp4" "${origin_file_name}-gifv.mp4"
+        exit 0
+    else
+        rm "${origin_file_name}-an.mp4"
+    fi
+else
+    ffmpeg \
+        -i "$1" \
+        -c:v libx264 \
+        -an \
+        "${origin_file_name}-an.mp4"
+    origin_size=$(wc -c "${origin_file_name}-an.mp4" | perl -nle'print $& while m{(?<=^\s)\d*}g')
+    if (( $origin_size < 10000000 ))
+    then
+        mv "${origin_file_name}-an.mp4" "${origin_file_name}-gifv.mp4"
+        exit 0
+    else
+        rm "${origin_file_name}-an.mp4"
+    fi
+fi
+
+origin_duration=$(ffprobe -v error -show_streams -select_streams v "$1" | perl -nle'print $& while m{(?<=^duration\=)\d*\.\d*}g')
 target_video_bitrate_kbit_s=$(\
     awk \
-    -v size="$target_video_size_MB" \
-    -v duration="$origin_duration_s" \
-    -v audio_rate="$target_audio_bitrate_kbit_s" \
-    'BEGIN { print  ( ( size * 8192.0 ) / ( 1.048576 * duration ) - audio_rate ) }')
+    -v duration="$origin_duration" \
+    'BEGIN { print  ( ( 10 * 8192.0 ) / ( 1.048576 * duration ) ) }')
 
 ffmpeg \
     -y \
@@ -26,6 +55,5 @@ ffmpeg \
     -c:v libx264 \
     -b:v "$target_video_bitrate_kbit_s"k \
     -pass 2 \
-    -c:a aac \
-    -b:a "$target_audio_bitrate_kbit_s"k \
-    "${1%.*}-$2mB.mp4"
+    -an \
+    "${origin_file_name}-gifv.mp4"
